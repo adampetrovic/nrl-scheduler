@@ -98,7 +98,7 @@ func (s *Server) setupRoutes() {
 	api.DELETE("/venues/:id", venueHandler.DeleteVenue)
 
 	// Draws endpoints
-	drawHandler := handlers.NewDrawHandler(s.repos.Draws(), s.repos.Teams(), s.wsHub)
+	drawHandler := handlers.NewDrawHandler(s.repos.Draws(), s.repos.Teams(), s.repos.Matches(), s.wsHub)
 	api.GET("/draws", drawHandler.GetDraws)
 	api.POST("/draws", drawHandler.CreateDraw)
 	api.GET("/draws/:id", drawHandler.GetDraw)

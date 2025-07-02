@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -24,11 +25,12 @@ type DrawHandler struct {
 	wsHub     *websocket.Hub
 }
 
-func NewDrawHandler(drawRepo storage.DrawRepository, teamRepo storage.TeamRepository, wsHub *websocket.Hub) *DrawHandler {
+func NewDrawHandler(drawRepo storage.DrawRepository, teamRepo storage.TeamRepository, matchRepo storage.MatchRepository, wsHub *websocket.Hub) *DrawHandler {
 	return &DrawHandler{
-		drawRepo: drawRepo,
-		teamRepo: teamRepo,
-		wsHub:    wsHub,
+		drawRepo:  drawRepo,
+		teamRepo:  teamRepo,
+		matchRepo: matchRepo,
+		wsHub:     wsHub,
 	}
 }
 
@@ -49,6 +51,7 @@ func (h *DrawHandler) GetDraws(c *gin.Context) {
 
 	draws, err := h.drawRepo.List(context.Background())
 	if err != nil {
+		log.Printf("Error retrieving draws: %v", err)
 		middleware.InternalError(c, "Failed to retrieve draws")
 		return
 	}
@@ -56,6 +59,7 @@ func (h *DrawHandler) GetDraws(c *gin.Context) {
 	// Convert to response format
 	drawResponses := make([]types.DrawResponse, len(draws))
 	for i, draw := range draws {
+		log.Printf("Converting draw %d: %+v", draw.ID, draw)
 		drawResponses[i] = types.DrawToResponse(draw)
 	}
 
