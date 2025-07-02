@@ -6,6 +6,7 @@ import (
 
 	"github.com/adampetrovic/nrl-scheduler/internal/core/constraints"
 	"github.com/adampetrovic/nrl-scheduler/internal/core/models"
+	"github.com/adampetrovic/nrl-scheduler/internal/core/optimizer"
 )
 
 // Team API types
@@ -148,6 +149,55 @@ type ConstraintViolation struct {
 	MatchID     *int              `json:"match_id,omitempty"`
 	Round       *int              `json:"round,omitempty"`
 	Details     map[string]interface{} `json:"details,omitempty"`
+}
+
+// Optimization API types
+type TemperatureScheduleRequest struct {
+	Type             string                 `json:"type"`
+	CoolingRate      float64               `json:"cooling_rate,omitempty"`
+	ScalingFactor    float64               `json:"scaling_factor,omitempty"`
+	ReheatFactor     float64               `json:"reheat_factor,omitempty"`
+	ReheatPeriod     int                   `json:"reheat_period,omitempty"`
+	AcceptanceTarget float64               `json:"acceptance_target,omitempty"`
+	AdaptationFactor float64               `json:"adaptation_factor,omitempty"`
+	Params           map[string]interface{} `json:"params,omitempty"`
+}
+
+type StartOptimizationRequest struct {
+	Temperature     float64                     `json:"temperature" validate:"required,min=0.1,max=1000"`
+	CoolingRate     float64                     `json:"cooling_rate" validate:"required,min=0.1,max=0.999"`
+	MaxIterations   int                         `json:"max_iterations" validate:"required,min=100,max=1000000"`
+	CoolingSchedule *TemperatureScheduleRequest `json:"cooling_schedule,omitempty"`
+}
+
+type StartOptimizationResponse struct {
+	JobID  string `json:"job_id"`
+	Status string `json:"status"`
+}
+
+type OptimizationStatusResponse struct {
+	JobID       string                      `json:"job_id"`
+	DrawID      int                         `json:"draw_id"`
+	Status      string                      `json:"status"`
+	Progress    optimizer.OptimizationProgress `json:"progress"`
+	StartedAt   time.Time                   `json:"started_at"`
+	CompletedAt *time.Time                  `json:"completed_at,omitempty"`
+	Error       *string                     `json:"error,omitempty"`
+}
+
+type OptimizationJobsResponse struct {
+	Jobs []*optimizer.OptimizationJob `json:"jobs"`
+}
+
+type ConstraintValidationResponse struct {
+	DrawID     int                             `json:"draw_id"`
+	IsValid    bool                            `json:"is_valid"`
+	Violations []constraints.ConstraintViolation `json:"violations"`
+}
+
+type DrawScoreResponse struct {
+	DrawID int     `json:"draw_id"`
+	Score  float64 `json:"score"`
 }
 
 // Generic API response types

@@ -10,25 +10,31 @@ import (
 
 	"github.com/adampetrovic/nrl-scheduler/internal/api/handlers"
 	"github.com/adampetrovic/nrl-scheduler/internal/api/middleware"
+	"github.com/adampetrovic/nrl-scheduler/internal/core/optimizer"
 	"github.com/adampetrovic/nrl-scheduler/internal/storage/sqlite"
 )
 
 type Server struct {
-	router   *gin.Engine
-	db       *sql.DB
-	repos    *sqlite.Repositories
-	validate *validator.Validate
+	router          *gin.Engine
+	db              *sql.DB
+	repos           *sqlite.Repositories
+	validate        *validator.Validate
+	optimizerService *optimizer.Service
 }
 
 func NewServer(db *sql.DB) *Server {
 	repos := sqlite.NewRepositories(db)
 	validate := validator.New()
+	
+	// Create optimizer service
+	optimizerService := optimizer.NewService(repos)
 
 	server := &Server{
-		router:   gin.New(),
-		db:       db,
-		repos:    repos,
-		validate: validate,
+		router:          gin.New(),
+		db:              db,
+		repos:           repos,
+		validate:        validate,
+		optimizerService: optimizerService,
 	}
 
 	server.setupMiddleware()
@@ -91,6 +97,10 @@ func (s *Server) setupRoutes() {
 	// Draw generation endpoints
 	api.POST("/draws/:id/generate", drawHandler.GenerateDraw)
 	api.POST("/draws/:id/validate-constraints", drawHandler.ValidateConstraints)
+
+	// Optimization endpoints
+	optimizationHandler := handlers.NewOptimizationHandler(s.optimizerService)
+	optimizationHandler.RegisterRoutes(api)
 
 	// Health check
 	s.router.GET("/health", func(c *gin.Context) {
