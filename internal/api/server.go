@@ -10,6 +10,7 @@ import (
 
 	"github.com/adampetrovic/nrl-scheduler/internal/api/handlers"
 	"github.com/adampetrovic/nrl-scheduler/internal/api/middleware"
+	"github.com/adampetrovic/nrl-scheduler/internal/api/websocket"
 	"github.com/adampetrovic/nrl-scheduler/internal/core/optimizer"
 	"github.com/adampetrovic/nrl-scheduler/internal/storage/sqlite"
 )
@@ -20,11 +21,15 @@ type Server struct {
 	repos           *sqlite.Repositories
 	validate        *validator.Validate
 	optimizerService *optimizer.Service
+	wsHub           *websocket.Hub
 }
 
 func NewServer(db *sql.DB) *Server {
 	repos := sqlite.NewRepositories(db)
 	validate := validator.New()
+	
+	// Create WebSocket hub
+	wsHub := websocket.NewHub()
 	
 	// Create optimizer service
 	optimizerService := optimizer.NewService(repos)
@@ -35,7 +40,14 @@ func NewServer(db *sql.DB) *Server {
 		repos:           repos,
 		validate:        validate,
 		optimizerService: optimizerService,
+		wsHub:           wsHub,
 	}
+
+	// Set up WebSocket broadcasting for the optimizer service
+	optimizerService.SetWebSocketHub(wsHub)
+
+	// Start WebSocket hub
+	go wsHub.Run()
 
 	server.setupMiddleware()
 	server.setupRoutes()
@@ -86,7 +98,7 @@ func (s *Server) setupRoutes() {
 	api.DELETE("/venues/:id", venueHandler.DeleteVenue)
 
 	// Draws endpoints
-	drawHandler := handlers.NewDrawHandler(s.repos.Draws(), s.repos.Teams())
+	drawHandler := handlers.NewDrawHandler(s.repos.Draws(), s.repos.Teams(), s.wsHub)
 	api.GET("/draws", drawHandler.GetDraws)
 	api.POST("/draws", drawHandler.CreateDraw)
 	api.GET("/draws/:id", drawHandler.GetDraw)
@@ -99,12 +111,35 @@ func (s *Server) setupRoutes() {
 	api.POST("/draws/:id/validate-constraints", drawHandler.ValidateConstraints)
 
 	// Optimization endpoints
-	optimizationHandler := handlers.NewOptimizationHandler(s.optimizerService)
+	optimizationHandler := handlers.NewOptimizationHandler(s.optimizerService, s.wsHub)
 	optimizationHandler.RegisterRoutes(api)
+
+	// WebSocket endpoint
+	s.router.GET("/ws", func(c *gin.Context) {
+		s.wsHub.ServeWS(c.Writer, c.Request)
+	})
 
 	// Health check
 	s.router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// Test WebSocket endpoint
+	s.router.POST("/test/websocket", func(c *gin.Context) {
+		if s.wsHub != nil {
+			s.wsHub.BroadcastMessage("test_message", gin.H{
+				"message": "Test WebSocket broadcast",
+				"timestamp": gin.H{},
+				"clients": s.wsHub.GetClientCount(),
+			})
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"message": "Test message broadcasted",
+				"clients": s.wsHub.GetClientCount(),
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "WebSocket hub not available"})
+		}
 	})
 }
 
@@ -115,4 +150,8 @@ func (s *Server) Run(addr string) error {
 
 func (s *Server) GetRouter() *gin.Engine {
 	return s.router
+}
+
+func (s *Server) GetWebSocketHub() *websocket.Hub {
+	return s.wsHub
 }

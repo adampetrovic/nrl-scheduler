@@ -35,9 +35,10 @@ type OptimizationJob struct {
 
 // JobManager manages optimization jobs
 type JobManager struct {
-	jobs    map[string]*OptimizationJob
-	mutex   sync.RWMutex
-	optimizer *SimulatedAnnealing
+	jobs        map[string]*OptimizationJob
+	mutex       sync.RWMutex
+	optimizer   *SimulatedAnnealing
+	broadcaster *OptimizationBroadcaster
 }
 
 // NewJobManager creates a new job manager
@@ -46,6 +47,11 @@ func NewJobManager(optimizer *SimulatedAnnealing) *JobManager {
 		jobs:      make(map[string]*OptimizationJob),
 		optimizer: optimizer,
 	}
+}
+
+// SetBroadcaster sets the WebSocket broadcaster for real-time updates
+func (jm *JobManager) SetBroadcaster(broadcaster *OptimizationBroadcaster) {
+	jm.broadcaster = broadcaster
 }
 
 // StartOptimization starts a new optimization job
@@ -75,10 +81,16 @@ func (jm *JobManager) StartOptimization(drawID int, draw *models.Draw) (string, 
 // runOptimization executes the optimization algorithm
 func (jm *JobManager) runOptimization(ctx context.Context, job *OptimizationJob, draw *models.Draw) {
 	jm.updateJobStatus(job.ID, JobStatusRunning)
+	startTime := time.Now()
 	
 	// Create progress callback
 	progressCallback := func(progress OptimizationProgress) {
 		jm.updateJobProgress(job.ID, progress)
+		
+		// Broadcast progress update
+		if jm.broadcaster != nil {
+			jm.broadcaster.BroadcastOptimizationProgress(job.ID, job.DrawID, progress, jm.optimizer.MaxIterations)
+		}
 		
 		// Check for cancellation
 		select {
@@ -101,14 +113,23 @@ func (jm *JobManager) runOptimization(ctx context.Context, job *OptimizationJob,
 	
 	// Update job with result
 	completedAt := time.Now()
+	duration := completedAt.Sub(startTime)
 	
 	jm.mutex.Lock()
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.Error = err.Error()
+		// Broadcast failure
+		if jm.broadcaster != nil {
+			jm.broadcaster.BroadcastOptimizationFailed(job.ID, job.DrawID, err)
+		}
 	} else {
 		job.Status = JobStatusCompleted
 		job.Result = result
+		// Broadcast completion
+		if jm.broadcaster != nil {
+			jm.broadcaster.BroadcastOptimizationCompleted(job.ID, job.DrawID, result, duration)
+		}
 	}
 	job.CompletedAt = &completedAt
 	jm.mutex.Unlock()

@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/adampetrovic/nrl-scheduler/internal/api/middleware"
+	"github.com/adampetrovic/nrl-scheduler/internal/api/websocket"
+	"github.com/adampetrovic/nrl-scheduler/internal/core/constraints"
 	"github.com/adampetrovic/nrl-scheduler/internal/core/models"
 	"github.com/adampetrovic/nrl-scheduler/internal/storage"
 	"github.com/adampetrovic/nrl-scheduler/pkg/types"
@@ -19,12 +21,14 @@ type DrawHandler struct {
 	drawRepo  storage.DrawRepository
 	teamRepo  storage.TeamRepository
 	matchRepo storage.MatchRepository
+	wsHub     *websocket.Hub
 }
 
-func NewDrawHandler(drawRepo storage.DrawRepository, teamRepo storage.TeamRepository) *DrawHandler {
+func NewDrawHandler(drawRepo storage.DrawRepository, teamRepo storage.TeamRepository, wsHub *websocket.Hub) *DrawHandler {
 	return &DrawHandler{
 		drawRepo: drawRepo,
 		teamRepo: teamRepo,
+		wsHub:    wsHub,
 	}
 }
 
@@ -134,6 +138,14 @@ func (h *DrawHandler) CreateDraw(c *gin.Context) {
 		return
 	}
 
+	// Broadcast draw creation event
+	if h.wsHub != nil {
+		h.wsHub.BroadcastMessage(websocket.DrawCreated, websocket.DrawEventData{
+			Draw:      drawModel,
+			Timestamp: time.Now(),
+		})
+	}
+
 	response := types.DrawToResponse(drawModel)
 	c.JSON(http.StatusCreated, response)
 }
@@ -186,6 +198,14 @@ func (h *DrawHandler) UpdateDraw(c *gin.Context) {
 		return
 	}
 
+	// Broadcast draw update event
+	if h.wsHub != nil {
+		h.wsHub.BroadcastMessage(websocket.DrawUpdated, websocket.DrawEventData{
+			Draw:      drawModel,
+			Timestamp: time.Now(),
+		})
+	}
+
 	response := types.DrawToResponse(drawModel)
 	c.JSON(http.StatusOK, response)
 }
@@ -205,6 +225,14 @@ func (h *DrawHandler) DeleteDraw(c *gin.Context) {
 		}
 		middleware.InternalError(c, "Failed to delete draw")
 		return
+	}
+
+	// Broadcast draw deletion event
+	if h.wsHub != nil {
+		h.wsHub.BroadcastMessage(websocket.DrawDeleted, websocket.DrawEventData{
+			Draw:      &models.Draw{ID: id}, // Just ID for deletion
+			Timestamp: time.Now(),
+		})
 	}
 
 	c.JSON(http.StatusOK, types.SuccessResponse{
@@ -332,6 +360,17 @@ func (h *DrawHandler) ValidateConstraints(c *gin.Context) {
 		IsValid:    true,
 		Violations: []types.ConstraintViolation{},
 		Score:      1.0,
+	}
+
+	// Broadcast constraint validation event
+	if h.wsHub != nil {
+		h.wsHub.BroadcastMessage(websocket.ConstraintsValidated, websocket.ConstraintsValidatedData{
+			DrawID:      id,
+			IsValid:     response.IsValid,
+			Violations:  []constraints.ConstraintViolation{}, // Convert from types.ConstraintViolation if needed
+			Score:       response.Score,
+			ValidatedAt: time.Now(),
+		})
 	}
 
 	c.JSON(http.StatusOK, response)

@@ -14,6 +14,7 @@ type Service struct {
 	repository       storage.Repositories
 	constraintEngine *constraints.ConstraintEngine
 	jobManager       *JobManager
+	broadcaster      *OptimizationBroadcaster
 }
 
 // NewService creates a new optimizer service
@@ -32,6 +33,12 @@ func NewService(repository storage.Repositories) *Service {
 		constraintEngine: constraintEngine,
 		jobManager:       jobManager,
 	}
+}
+
+// SetWebSocketHub sets up WebSocket broadcasting for real-time updates
+func (s *Service) SetWebSocketHub(wsHub WebSocketBroadcaster) {
+	s.broadcaster = NewOptimizationBroadcaster(wsHub)
+	s.jobManager.SetBroadcaster(s.broadcaster)
 }
 
 // OptimizeDraw starts optimization for a specific draw

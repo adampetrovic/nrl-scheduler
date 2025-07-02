@@ -3,8 +3,10 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/adampetrovic/nrl-scheduler/internal/api/websocket"
 	"github.com/adampetrovic/nrl-scheduler/internal/core/optimizer"
 	"github.com/adampetrovic/nrl-scheduler/pkg/types"
 )
@@ -12,12 +14,14 @@ import (
 // OptimizationHandler handles optimization-related HTTP requests
 type OptimizationHandler struct {
 	optimizerService *optimizer.Service
+	wsHub           *websocket.Hub
 }
 
 // NewOptimizationHandler creates a new optimization handler
-func NewOptimizationHandler(optimizerService *optimizer.Service) *OptimizationHandler {
+func NewOptimizationHandler(optimizerService *optimizer.Service, wsHub *websocket.Hub) *OptimizationHandler {
 	return &OptimizationHandler{
 		optimizerService: optimizerService,
+		wsHub:           wsHub,
 	}
 }
 
@@ -78,6 +82,16 @@ func (h *OptimizationHandler) StartOptimization(c *gin.Context) {
 		return
 	}
 
+	// Broadcast optimization started event
+	if h.wsHub != nil {
+		h.wsHub.BroadcastMessage(websocket.OptimizationStarted, websocket.OptimizationStartedData{
+			JobID:     jobID,
+			DrawID:    drawID,
+			StartedAt: time.Now(),
+			Config:    config,
+		})
+	}
+
 	c.JSON(http.StatusAccepted, types.StartOptimizationResponse{
 		JobID: jobID,
 		Status: "started",
@@ -121,6 +135,9 @@ func (h *OptimizationHandler) GetOptimizationStatus(c *gin.Context) {
 func (h *OptimizationHandler) CancelOptimization(c *gin.Context) {
 	jobID := c.Param("jobId")
 
+	// Get job info before cancellation
+	job, _ := h.optimizerService.GetOptimizationJob(jobID)
+
 	err := h.optimizerService.CancelOptimization(jobID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
@@ -131,6 +148,15 @@ func (h *OptimizationHandler) CancelOptimization(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	// Broadcast optimization cancelled event
+	if h.wsHub != nil && job != nil {
+		h.wsHub.BroadcastMessage(websocket.OptimizationCancelled, websocket.OptimizationCancelledData{
+			JobID:       jobID,
+			DrawID:      job.DrawID,
+			CancelledAt: time.Now(),
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -212,6 +238,22 @@ func (h *OptimizationHandler) ValidateDrawConstraints(c *gin.Context) {
 		DrawID:     drawID,
 		IsValid:    len(violations) == 0,
 		Violations: violations,
+	}
+
+	// Broadcast constraint validation event
+	if h.wsHub != nil {
+		severity := "info"
+		if len(violations) > 0 {
+			severity = "warning"
+		}
+		
+		h.wsHub.BroadcastMessage(websocket.ConstraintViolation, websocket.ConstraintViolationData{
+			DrawID:     drawID,
+			Violations: violations,
+			TotalCount: len(violations),
+			Severity:   severity,
+			Timestamp:  time.Now(),
+		})
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -322,16 +364,16 @@ func (h *OptimizationHandler) SetOptimizationConfig(c *gin.Context) {
 
 // RegisterRoutes registers optimization routes with the Gin router
 func (h *OptimizationHandler) RegisterRoutes(router *gin.RouterGroup) {
-	// Optimization job management
-	router.POST("/optimize/:drawId/start", h.StartOptimization)
-	router.GET("/optimize/:jobId/status", h.GetOptimizationStatus)
-	router.POST("/optimize/:jobId/cancel", h.CancelOptimization)
-	router.GET("/optimize/:jobId/result", h.GetOptimizationResult)
-	router.POST("/optimize/:jobId/apply", h.ApplyOptimizationResult)
+	// Optimization job management - separate draw and job routes
+	router.POST("/optimize/draws/:drawId/start", h.StartOptimization)
+	router.GET("/optimize/jobs/:jobId/status", h.GetOptimizationStatus)
+	router.POST("/optimize/jobs/:jobId/cancel", h.CancelOptimization)
+	router.GET("/optimize/jobs/:jobId/result", h.GetOptimizationResult)
+	router.POST("/optimize/jobs/:jobId/apply", h.ApplyOptimizationResult)
 
-	// Draw validation and scoring
-	router.GET("/draws/:drawId/validate-constraints", h.ValidateDrawConstraints)
-	router.GET("/draws/:drawId/score", h.ScoreDraw)
+	// Draw validation and scoring - use optimize prefix to avoid conflicts
+	router.GET("/optimize/draws/:drawId/validate-constraints", h.ValidateDrawConstraints)
+	router.GET("/optimize/draws/:drawId/score", h.ScoreDraw)
 
 	// Job listing and statistics
 	router.GET("/optimize/jobs", h.ListOptimizationJobs)
